@@ -52,7 +52,6 @@ export default function AddMember() {
     }
 
     // In real app, this would save to database
-    console.log("Saving member:", formData);
     
     toast({
       title: "Member Added Successfully",

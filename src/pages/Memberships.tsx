@@ -8,6 +8,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Edit, Trash2, Users, DollarSign } from "lucide-react";
 
+interface MembershipPlan {
+  id: number
+  name: string
+  price: number
+  duration: string
+  features: string[]
+  memberCount: number
+  isActive: boolean
+}
+
 // Mock membership plans data
 const mockPlans = [
   {
@@ -52,7 +62,7 @@ export default function Memberships() {
   const { toast } = useToast();
   const [plans, setPlans] = useState(mockPlans);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [editingPlan, setEditingPlan] = useState<any>(null);
+  const [editingPlan, setEditingPlan] = useState<MembershipPlan | null>(null);
   const [formData, setFormData] = useState({
     name: "",
     price: "",
@@ -119,7 +129,7 @@ export default function Memberships() {
     setIsDialogOpen(false);
   };
 
-  const handleEdit = (plan: any) => {
+  const handleEdit = (plan: MembershipPlan) => {
     setEditingPlan(plan);
     setFormData({
       name: plan.name,

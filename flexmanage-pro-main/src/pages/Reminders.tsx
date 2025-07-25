@@ -5,25 +5,24 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Bell, Calendar, Users, Clock, AlertCircle, CheckCircle2 } from "lucide-react";
 
-import { supabase } from "@/integrations/supabase/client";
-
+export default function Reminders() {
   const [reminders, setReminders] = useState<any[]>([]);
-  // Fetch reminders from Supabase
+import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/integrations/supabase/client";
+export default function Reminders() {
+  const [reminders, setReminders] = useState<any[]>([]);
+  const [filterType, setFilterType] = useState("All");
+  const [filterStatus, setFilterStatus] = useState("pending");
+
   useEffect(() => {
     const fetchReminders = async () => {
       const { data, error } = await supabase
         .from("reminders")
         .select("*");
-      if (error) {
-        // Optionally show error toast
-      } else {
-        setReminders(data || []);
-      }
+      if (!error) setReminders(data || []);
     };
     fetchReminders();
   }, []);
-  const [filterType, setFilterType] = useState("All");
-  const [filterStatus, setFilterStatus] = useState("pending");
 
   const filteredReminders = reminders.filter(reminder => {
     const matchesType = filterType === "All" || reminder.type === filterType;
@@ -36,7 +35,6 @@ import { supabase } from "@/integrations/supabase/client";
       .from("reminders")
       .update({ status: "completed" })
       .eq("id", id);
-    // Refresh reminders
     const { data } = await supabase.from("reminders").select("*");
     setReminders(data || []);
   };
@@ -46,7 +44,6 @@ import { supabase } from "@/integrations/supabase/client";
       .from("reminders")
       .update({ status: "pending" })
       .eq("id", id);
-    // Refresh reminders
     const { data } = await supabase.from("reminders").select("*");
     setReminders(data || []);
   };
@@ -54,43 +51,13 @@ import { supabase } from "@/integrations/supabase/client";
   const getPriorityBadge = (priority: string) => {
     switch (priority) {
       case "high":
-        return <Badge variant="destructive">High Priority</Badge>;
+        return <Badge className="bg-destructive text-destructive-foreground">High Priority</Badge>;
       case "medium":
-        return <Badge className="bg-warning">Medium Priority</Badge>;
+        return <Badge className="bg-warning text-warning-foreground">Medium Priority</Badge>;
       case "low":
-        return <Badge variant="outline">Low Priority</Badge>;
+        return <Badge className="border text-foreground">Low Priority</Badge>;
       default:
-        return <Badge variant="outline">{priority}</Badge>;
-    }
-  };
-
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case "membership_expiry":
-        return <Calendar className="w-5 h-5 text-warning" />;
-      case "payment_due":
-        return <Clock className="w-5 h-5 text-accent" />;
-      case "payment_overdue":
-        return <AlertCircle className="w-5 h-5 text-destructive" />;
-      case "follow_up":
-        return <Users className="w-5 h-5 text-primary" />;
-      default:
-        return <Bell className="w-5 h-5 text-muted-foreground" />;
-    }
-  };
-
-  const getTypeLabel = (type: string) => {
-    switch (type) {
-      case "membership_expiry":
-        return "Membership Expiry";
-      case "payment_due":
-        return "Payment Due";
-      case "payment_overdue":
-        return "Payment Overdue";
-      case "follow_up":
-        return "Follow Up";
-      default:
-        return type;
+        return <Badge className="border text-foreground">{priority}</Badge>;
     }
   };
 
@@ -106,7 +73,6 @@ import { supabase } from "@/integrations/supabase/client";
           <p className="text-muted-foreground">Stay on top of important member activities and deadlines.</p>
         </div>
       </div>
-
       {/* Summary Cards */}
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
@@ -119,7 +85,6 @@ import { supabase } from "@/integrations/supabase/client";
             <p className="text-xs text-muted-foreground">Require your attention</p>
           </CardContent>
         </Card>
-
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">High Priority</CardTitle>
@@ -130,7 +95,6 @@ import { supabase } from "@/integrations/supabase/client";
             <p className="text-xs text-destructive">Urgent items</p>
           </CardContent>
         </Card>
-
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Completed</CardTitle>
@@ -142,7 +106,6 @@ import { supabase } from "@/integrations/supabase/client";
           </CardContent>
         </Card>
       </div>
-
       {/* Filters */}
       <Card>
         <CardContent className="pt-6">
@@ -156,7 +119,7 @@ import { supabase } from "@/integrations/supabase/client";
                   size="sm"
                   onClick={() => setFilterType(type)}
                 >
-                  {type === "All" ? "All" : getTypeLabel(type)}
+                  {type === "All" ? "All" : type.replace(/_/g, " ")}
                 </Button>
               ))}
             </div>
@@ -176,7 +139,6 @@ import { supabase } from "@/integrations/supabase/client";
           </div>
         </CardContent>
       </Card>
-
       {/* Reminders List */}
       <div className="space-y-4">
         {filteredReminders.map((reminder) => (
@@ -189,7 +151,6 @@ import { supabase } from "@/integrations/supabase/client";
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-3">
-                    {getTypeIcon(reminder.type)}
                     <Avatar className="h-10 w-10">
                       <AvatarFallback className="bg-primary text-primary-foreground text-sm">
                         {reminder.member?.split(' ').map((n: string) => n[0]).join('')}
@@ -201,7 +162,55 @@ import { supabase } from "@/integrations/supabase/client";
                     <p className="text-sm text-muted-foreground">{reminder.message}</p>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-xs text-muted-foreground">Due: {reminder.dueDate}</span>
-                      <span className="text-xs text-muted-foreground"></span>
+                      <span className="text-xs text-muted-foreground">•</span>
+                      <span className="text-xs text-muted-foreground">{reminder.type?.replace(/_/g, " ")}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  {getPriorityBadge(reminder.priority)}
+                  <div className="flex gap-2">
+                    {reminder.status === "pending" ? (
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => markAsCompleted(reminder.id)}
+                        className="text-success hover:bg-success hover:text-success-foreground"
+                      >
+                        <CheckCircle2 className="w-4 h-4 mr-1" />
+                        Mark Complete
+                      </Button>
+                    ) : (
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => markAsPending(reminder.id)}
+                      >
+                        <Clock className="w-4 h-4 mr-1" />
+                        Mark Pending
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+      {filteredReminders.length === 0 && (
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-center py-12">
+              <Bell className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-medium mb-2">No reminders found</h3>
+              <p className="text-muted-foreground">No reminders match your current filters.</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
                       <span className="text-xs text-muted-foreground">{getTypeLabel(reminder.type)}</span>
                     </div>
                   </div>
@@ -253,3 +262,5 @@ import { supabase } from "@/integrations/supabase/client";
     </div>
   );
 }
+
+export default Reminders;

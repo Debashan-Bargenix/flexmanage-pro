@@ -1,6 +1,9 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { useNavigate } from "react-router-dom";
 import { 
   Users, 
   CreditCard, 
@@ -11,30 +14,80 @@ import {
   DollarSign
 } from "lucide-react";
 
-// Mock data - in real app this would come from your database
-const mockStats = {
-  totalMembers: 847,
-  activeMembers: 732,
-  monthlyRevenue: 28450,
-  expiringMemberships: 23,
-  newMembersThisMonth: 45,
-  pendingPayments: 8
-};
-
-const mockRecentMembers = [
-  { id: 1, name: "John Smith", plan: "Premium", status: "Active", joinDate: "2024-01-15" },
-  { id: 2, name: "Sarah Johnson", plan: "Basic", status: "Active", joinDate: "2024-01-14" },
-  { id: 3, name: "Mike Wilson", plan: "Premium", status: "Expiring", joinDate: "2023-12-15" },
-  { id: 4, name: "Emily Davis", plan: "Basic", status: "Active", joinDate: "2024-01-13" },
-];
-
-const mockUpcomingPayments = [
-  { id: 1, member: "Alex Thompson", amount: 79, dueDate: "2024-01-20" },
-  { id: 2, member: "Lisa Brown", amount: 49, dueDate: "2024-01-22" },
-  { id: 3, member: "David Miller", amount: 79, dueDate: "2024-01-25" },
-];
-
 export default function Dashboard() {
+  const navigate = useNavigate();
+
+  // Fetch dashboard statistics
+  const { data: stats } = useQuery({
+    queryKey: ['dashboard-stats'],
+    queryFn: async () => {
+      const [membersResult, paymentsResult, membershipsResult] = await Promise.all([
+        supabase.from('members').select('status'),
+        supabase.from('payments').select('amount, payment_date').gte('payment_date', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]),
+        supabase.from('member_memberships').select('status, end_date').gte('end_date', new Date().toISOString().split('T')[0]).lte('end_date', new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
+      ]);
+
+      const totalMembers = membersResult.data?.length || 0;
+      const activeMembers = membersResult.data?.filter(m => m.status === 'active').length || 0;
+      const monthlyRevenue = paymentsResult.data?.reduce((sum, p) => sum + parseFloat(p.amount || '0'), 0) || 0;
+      const expiringMemberships = membershipsResult.data?.length || 0;
+
+      return {
+        totalMembers,
+        activeMembers,
+        monthlyRevenue,
+        expiringMemberships
+      };
+    }
+  });
+
+  // Fetch recent members
+  const { data: recentMembers } = useQuery({
+    queryKey: ['recent-members'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('members')
+        .select(`
+          id, first_name, last_name, status, created_at,
+          member_memberships(membership_plans(name))
+        `)
+        .order('created_at', { ascending: false })
+        .limit(4);
+      
+      return data?.map(member => ({
+        id: member.id,
+        name: `${member.first_name} ${member.last_name}`,
+        plan: member.member_memberships?.[0]?.membership_plans?.name || 'No Plan',
+        status: member.status === 'active' ? 'Active' : 'Inactive'
+      })) || [];
+    }
+  });
+
+  // Fetch upcoming payments (reminders)
+  const { data: upcomingPayments } = useQuery({
+    queryKey: ['upcoming-payments'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('reminders')
+        .select(`
+          id, reminder_date,
+          members(first_name, last_name),
+          member_memberships(membership_plans(price))
+        `)
+        .eq('type', 'payment_due')
+        .eq('status', 'pending')
+        .order('reminder_date', { ascending: true })
+        .limit(3);
+      
+      return data?.map(reminder => ({
+        id: reminder.id,
+        member: `${reminder.members?.first_name} ${reminder.members?.last_name}`,
+        amount: reminder.member_memberships?.membership_plans?.price || 0,
+        dueDate: reminder.reminder_date
+      })) || [];
+    }
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -42,7 +95,7 @@ export default function Dashboard() {
           <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
           <p className="text-muted-foreground">Welcome back! Here's your gym overview.</p>
         </div>
-        <Button className="bg-gradient-primary">
+        <Button className="bg-gradient-primary" onClick={() => navigate('/add-member')}>
           <Plus className="w-4 h-4 mr-2" />
           Quick Add Member
         </Button>
@@ -56,9 +109,9 @@ export default function Dashboard() {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{mockStats.totalMembers}</div>
+            <div className="text-2xl font-bold">{stats?.totalMembers || 0}</div>
             <p className="text-xs text-muted-foreground">
-              {mockStats.activeMembers} active
+              {stats?.activeMembers || 0} active
             </p>
           </CardContent>
         </Card>
@@ -69,9 +122,9 @@ export default function Dashboard() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${mockStats.monthlyRevenue.toLocaleString()}</div>
+            <div className="text-2xl font-bold">${stats?.monthlyRevenue?.toLocaleString() || '0'}</div>
             <p className="text-xs text-success">
-              +12% from last month
+              Current month
             </p>
           </CardContent>
         </Card>
@@ -82,9 +135,9 @@ export default function Dashboard() {
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{mockStats.newMembersThisMonth}</div>
+            <div className="text-2xl font-bold">{recentMembers?.length || 0}</div>
             <p className="text-xs text-muted-foreground">
-              This month
+              Recently added
             </p>
           </CardContent>
         </Card>
@@ -95,7 +148,7 @@ export default function Dashboard() {
             <Bell className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{mockStats.expiringMemberships}</div>
+            <div className="text-2xl font-bold">{stats?.expiringMemberships || 0}</div>
             <p className="text-xs text-warning">
               Memberships expiring soon
             </p>
@@ -111,40 +164,48 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {mockRecentMembers.map((member) => (
-                <div key={member.id} className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium">{member.name}</p>
-                    <p className="text-sm text-muted-foreground">{member.plan} Plan</p>
+              {recentMembers?.length ? (
+                recentMembers.map((member) => (
+                  <div key={member.id} className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">{member.name}</p>
+                      <p className="text-sm text-muted-foreground">{member.plan}</p>
+                    </div>
+                    <Badge 
+                      variant={member.status === "Active" ? "default" : "destructive"}
+                    >
+                      {member.status}
+                    </Badge>
                   </div>
-                  <Badge 
-                    variant={member.status === "Active" ? "default" : "destructive"}
-                  >
-                    {member.status}
-                  </Badge>
-                </div>
-              ))}
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground">No recent members</p>
+              )}
             </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Upcoming Payments</CardTitle>
+            <CardTitle>Upcoming Payment Reminders</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {mockUpcomingPayments.map((payment) => (
-                <div key={payment.id} className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium">{payment.member}</p>
-                    <p className="text-sm text-muted-foreground">Due: {payment.dueDate}</p>
+              {upcomingPayments?.length ? (
+                upcomingPayments.map((payment) => (
+                  <div key={payment.id} className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">{payment.member}</p>
+                      <p className="text-sm text-muted-foreground">Due: {payment.dueDate}</p>
+                    </div>
+                    <Badge variant="outline">
+                      ${payment.amount}
+                    </Badge>
                   </div>
-                  <Badge variant="outline">
-                    ${payment.amount}
-                  </Badge>
-                </div>
-              ))}
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground">No upcoming reminders</p>
+              )}
             </div>
           </CardContent>
         </Card>

@@ -29,7 +29,7 @@ export default function Dashboard() {
 
       const totalMembers = membersResult.data?.length || 0;
       const activeMembers = membersResult.data?.filter(m => m.status === 'active').length || 0;
-      const monthlyRevenue = paymentsResult.data?.reduce((sum, p) => sum + parseFloat(p.amount || '0'), 0) || 0;
+      const monthlyRevenue = paymentsResult.data?.reduce((sum, p) => sum + parseFloat(String(p.amount || '0')), 0) || 0;
       const expiringMemberships = membershipsResult.data?.length || 0;
 
       return {

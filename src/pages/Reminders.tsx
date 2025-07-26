@@ -3,61 +3,58 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import { Bell, Calendar, Users, Clock, AlertCircle, CheckCircle2 } from "lucide-react";
 
-// Mock reminders data
-const mockReminders = [
-  {
-    id: 1,
-    type: "membership_expiry",
-    member: "John Smith",
-    message: "Premium membership expires in 3 days",
-    dueDate: "2024-01-25",
-    priority: "high",
-    status: "pending"
-  },
-  {
-    id: 2,
-    type: "payment_due", 
-    member: "Sarah Johnson",
-    message: "Monthly payment due in 5 days",
-    dueDate: "2024-01-27",
-    priority: "medium",
-    status: "pending"
-  },
-  {
-    id: 3,
-    type: "membership_expiry",
-    member: "Mike Wilson",
-    message: "Basic membership expires in 7 days",
-    dueDate: "2024-01-29",
-    priority: "medium",
-    status: "pending"
-  },
-  {
-    id: 4,
-    type: "payment_overdue",
-    member: "Emily Davis",
-    message: "Payment overdue by 2 days",
-    dueDate: "2024-01-20",
-    priority: "high",
-    status: "pending"
-  },
-  {
-    id: 5,
-    type: "follow_up",
-    member: "Alex Thompson",
-    message: "Follow up on membership renewal",
-    dueDate: "2024-01-24",
-    priority: "low",
-    status: "completed"
-  }
-];
-
 export default function Reminders() {
-  const [reminders, setReminders] = useState(mockReminders);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [filterType, setFilterType] = useState("All");
   const [filterStatus, setFilterStatus] = useState("pending");
+
+  // Fetch reminders
+  const { data: reminders = [] } = useQuery({
+    queryKey: ['reminders'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('reminders')
+        .select(`
+          *,
+          members(first_name, last_name)
+        `)
+        .order('reminder_date', { ascending: true });
+      
+      if (error) throw error;
+      
+      return data?.map(reminder => ({
+        id: reminder.id,
+        type: reminder.type,
+        member: `${reminder.members?.first_name} ${reminder.members?.last_name}`,
+        message: reminder.message || reminder.title,
+        dueDate: reminder.reminder_date,
+        priority: reminder.priority,
+        status: reminder.status
+      })) || [];
+    }
+  });
+
+  // Update reminder status mutation
+  const updateStatusMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: string }) => {
+      const { error } = await supabase
+        .from('reminders')
+        .update({ status })
+        .eq('id', id);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reminders'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+    }
+  });
 
   const filteredReminders = reminders.filter(reminder => {
     const matchesType = filterType === "All" || reminder.type === filterType;
@@ -65,16 +62,20 @@ export default function Reminders() {
     return matchesType && matchesStatus;
   });
 
-  const markAsCompleted = (id: number) => {
-    setReminders(prev => prev.map(reminder =>
-      reminder.id === id ? { ...reminder, status: "completed" } : reminder
-    ));
+  const markAsCompleted = (id: string) => {
+    updateStatusMutation.mutate({ id, status: 'completed' });
+    toast({
+      title: "Reminder Completed",
+      description: "Reminder has been marked as completed.",
+    });
   };
 
-  const markAsPending = (id: number) => {
-    setReminders(prev => prev.map(reminder =>
-      reminder.id === id ? { ...reminder, status: "pending" } : reminder
-    ));
+  const markAsPending = (id: string) => {
+    updateStatusMutation.mutate({ id, status: 'pending' });
+    toast({
+      title: "Reminder Updated",
+      description: "Reminder has been marked as pending.",
+    });
   };
 
   const getPriorityBadge = (priority: string) => {
@@ -243,6 +244,7 @@ export default function Reminders() {
                         size="sm"
                         onClick={() => markAsCompleted(reminder.id)}
                         className="text-success hover:bg-success hover:text-success-foreground"
+                        disabled={updateStatusMutation.isPending}
                       >
                         <CheckCircle2 className="w-4 h-4 mr-1" />
                         Mark Complete
@@ -252,6 +254,7 @@ export default function Reminders() {
                         variant="outline" 
                         size="sm"
                         onClick={() => markAsPending(reminder.id)}
+                        disabled={updateStatusMutation.isPending}
                       >
                         <Clock className="w-4 h-4 mr-1" />
                         Mark Pending

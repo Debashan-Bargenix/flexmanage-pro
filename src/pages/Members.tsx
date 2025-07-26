@@ -4,6 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
+import { useNavigate } from "react-router-dom";
 import { 
   Search, 
   Plus, 
@@ -13,70 +17,94 @@ import {
   Filter
 } from "lucide-react";
 
-// Mock data - in real app this would come from your database
-const mockMembers = [
-  {
-    id: 1,
-    name: "John Smith",
-    email: "john.smith@email.com",
-    phone: "(555) 123-4567",
-    plan: "Premium",
-    status: "Active",
-    joinDate: "2024-01-15",
-    expiryDate: "2024-07-15",
-    paymentStatus: "Paid"
-  },
-  {
-    id: 2,
-    name: "Sarah Johnson", 
-    email: "sarah.j@email.com",
-    phone: "(555) 234-5678",
-    plan: "Basic",
-    status: "Active",
-    joinDate: "2024-01-14",
-    expiryDate: "2024-07-14",
-    paymentStatus: "Paid"
-  },
-  {
-    id: 3,
-    name: "Mike Wilson",
-    email: "mike.wilson@email.com", 
-    phone: "(555) 345-6789",
-    plan: "Premium",
-    status: "Expiring",
-    joinDate: "2023-12-15",
-    expiryDate: "2024-01-25",
-    paymentStatus: "Due"
-  },
-  {
-    id: 4,
-    name: "Emily Davis",
-    email: "emily.davis@email.com",
-    phone: "(555) 456-7890", 
-    plan: "Basic",
-    status: "Active",
-    joinDate: "2024-01-13",
-    expiryDate: "2024-07-13",
-    paymentStatus: "Paid"
-  },
-  {
-    id: 5,
-    name: "Alex Thompson",
-    email: "alex.t@email.com",
-    phone: "(555) 567-8901",
-    plan: "Premium", 
-    status: "Active",
-    joinDate: "2024-01-10",
-    expiryDate: "2024-07-10",
-    paymentStatus: "Paid"
-  }
-];
-
 export default function Members() {
+  const { toast } = useToast();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("All");
 
-  const filteredMembers = mockMembers.filter(member => {
+  // Fetch members with their memberships
+  const { data: members = [] } = useQuery({
+    queryKey: ['members'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('members')
+        .select(`
+          *,
+          member_memberships(
+            id, status, end_date,
+            membership_plans(name, price)
+          )
+        `)
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      
+      return data?.map(member => {
+        const activeMembership = member.member_memberships?.find(m => m.status === 'active');
+        const endDate = activeMembership?.end_date;
+        const plan = activeMembership?.membership_plans?.name || 'No Plan';
+        
+        // Determine status based on membership end date
+        let memberStatus = member.status;
+        if (endDate) {
+          const daysUntilExpiry = Math.ceil((new Date(endDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+          if (daysUntilExpiry <= 0) {
+            memberStatus = 'Expired';
+          } else if (daysUntilExpiry <= 7) {
+            memberStatus = 'Expiring';
+          }
+        }
+        
+        return {
+          id: member.id,
+          name: `${member.first_name} ${member.last_name}`,
+          email: member.email || '',
+          phone: member.phone || '',
+          plan,
+          status: memberStatus,
+          joinDate: member.created_at.split('T')[0],
+          expiryDate: endDate || 'N/A',
+          paymentStatus: endDate && new Date(endDate) > new Date() ? 'Paid' : 'Due'
+        };
+      }) || [];
+    }
+  });
+
+  // Delete member mutation
+  const deleteMutation = useMutation({
+    mutationFn: async (memberId: string) => {
+      const { error } = await supabase
+        .from('members')
+        .delete()
+        .eq('id', memberId);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['members'] });
+      toast({
+        title: "Member Deleted",
+        description: "Member has been successfully deleted.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: "Failed to delete member. Please try again.",
+        variant: "destructive"
+      });
+    }
+  });
+
+  const handleDelete = (memberId: string) => {
+    if (confirm("Are you sure you want to delete this member?")) {
+      deleteMutation.mutate(memberId);
+    }
+  };
+
+  const filteredMembers = members.filter(member => {
     const matchesSearch = member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          member.email.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesFilter = filterStatus === "All" || member.status === filterStatus;
@@ -116,7 +144,7 @@ export default function Members() {
           <h2 className="text-3xl font-bold tracking-tight">Members</h2>
           <p className="text-muted-foreground">Manage your gym members and their memberships.</p>
         </div>
-        <Button className="bg-gradient-primary">
+        <Button className="bg-gradient-primary" onClick={() => navigate('/add-member')}>
           <Plus className="w-4 h-4 mr-2" />
           Add New Member
         </Button>
@@ -182,13 +210,18 @@ export default function Members() {
                   </div>
                   
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" onClick={() => navigate(`/members/${member.id}`)}>
                       <Eye className="w-4 h-4" />
                     </Button>
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" onClick={() => navigate(`/members/${member.id}/edit`)}>
                       <Edit className="w-4 h-4" />
                     </Button>
-                    <Button variant="outline" size="sm" className="text-destructive hover:bg-destructive hover:text-destructive-foreground">
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="text-destructive hover:bg-destructive hover:text-destructive-foreground"
+                      onClick={() => handleDelete(member.id)}
+                    >
                       <Trash2 className="w-4 h-4" />
                     </Button>
                   </div>

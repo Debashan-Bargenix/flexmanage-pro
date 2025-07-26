@@ -7,62 +7,13 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { Plus, Search, Filter, DollarSign, Calendar, User } from "lucide-react";
-
-// Mock payments data
-const mockPayments = [
-  {
-    id: 1,
-    memberName: "John Smith",
-    amount: 79,
-    plan: "Premium Plan",
-    date: "2024-01-15",
-    status: "Completed",
-    method: "Credit Card",
-    transactionId: "TXN001234"
-  },
-  {
-    id: 2,
-    memberName: "Sarah Johnson",
-    amount: 49,
-    plan: "Basic Plan", 
-    date: "2024-01-14",
-    status: "Completed",
-    method: "Bank Transfer",
-    transactionId: "TXN001235"
-  },
-  {
-    id: 3,
-    memberName: "Mike Wilson",
-    amount: 79,
-    plan: "Premium Plan",
-    date: "2024-01-13",
-    status: "Pending",
-    method: "Credit Card",
-    transactionId: "TXN001236"
-  },
-  {
-    id: 4,
-    memberName: "Emily Davis",
-    amount: 49,
-    plan: "Basic Plan",
-    date: "2024-01-12",
-    status: "Failed",
-    method: "Credit Card",
-    transactionId: "TXN001237"
-  }
-];
-
-const mockMembers = [
-  { id: 1, name: "John Smith", plan: "Premium Plan", amount: 79 },
-  { id: 2, name: "Sarah Johnson", plan: "Basic Plan", amount: 49 },
-  { id: 3, name: "Mike Wilson", plan: "Premium Plan", amount: 79 },
-  { id: 4, name: "Emily Davis", plan: "Basic Plan", amount: 49 },
-];
 
 export default function Payments() {
   const { toast } = useToast();
-  const [payments, setPayments] = useState(mockPayments);
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("All");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -70,7 +21,104 @@ export default function Payments() {
     memberId: "",
     amount: "",
     method: "",
-    date: new Date().toISOString().split('T')[0]
+    date: new Date().toISOString().split('T')[0],
+    description: ""
+  });
+
+  // Fetch payments with member and plan info
+  const { data: payments = [] } = useQuery({
+    queryKey: ['payments'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('payments')
+        .select(`
+          *,
+          members(first_name, last_name),
+          member_memberships(membership_plans(name))
+        `)
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      
+      return data?.map(payment => ({
+        id: payment.id,
+        memberName: `${payment.members?.first_name} ${payment.members?.last_name}`,
+        amount: parseFloat(String(payment.amount)),
+        plan: payment.member_memberships?.membership_plans?.name || 'Direct Payment',
+        date: payment.payment_date,
+        status: payment.status === 'completed' ? 'Completed' : 
+                payment.status === 'pending' ? 'Pending' : 'Failed',
+        method: payment.payment_method,
+        transactionId: payment.id.slice(0, 8).toUpperCase(),
+        description: payment.description
+      })) || [];
+    }
+  });
+
+  // Fetch members for the form
+  const { data: members = [] } = useQuery({
+    queryKey: ['members-for-payment'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('members')
+        .select(`
+          id, first_name, last_name,
+          member_memberships(membership_plans(name, price))
+        `)
+        .eq('status', 'active');
+      
+      if (error) throw error;
+      
+      return data?.map(member => ({
+        id: member.id,
+        name: `${member.first_name} ${member.last_name}`,
+        plan: member.member_memberships?.[0]?.membership_plans?.name || 'No Plan',
+        amount: member.member_memberships?.[0]?.membership_plans?.price || 0
+      })) || [];
+    }
+  });
+
+  // Create payment mutation
+  const createPaymentMutation = useMutation({
+    mutationFn: async (paymentData: any) => {
+      const { error } = await supabase
+        .from('payments')
+        .insert({
+          member_id: paymentData.memberId,
+          amount: parseFloat(paymentData.amount),
+          payment_method: paymentData.method,
+          payment_date: paymentData.date,
+          description: paymentData.description || `Payment via ${paymentData.method}`,
+          status: 'completed'
+        });
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['payments'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+      
+      toast({
+        title: "Payment Recorded",
+        description: `Payment of $${formData.amount} has been recorded successfully.`,
+      });
+
+      setFormData({
+        memberId: "",
+        amount: "",
+        method: "",
+        date: new Date().toISOString().split('T')[0],
+        description: ""
+      });
+      setIsDialogOpen(false);
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to record payment. Please try again.",
+        variant: "destructive"
+      });
+    }
   });
 
   const filteredPayments = payments.filter(payment => {
@@ -82,6 +130,14 @@ export default function Payments() {
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+    
+    // Auto-fill amount when member is selected
+    if (field === 'memberId') {
+      const selectedMember = members.find(m => m.id === value);
+      if (selectedMember && selectedMember.amount > 0) {
+        setFormData(prev => ({ ...prev, amount: selectedMember.amount.toString() }));
+      }
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -96,33 +152,7 @@ export default function Payments() {
       return;
     }
 
-    const selectedMember = mockMembers.find(m => m.id.toString() === formData.memberId);
-    if (!selectedMember) return;
-
-    const newPayment = {
-      id: Math.max(...payments.map(p => p.id)) + 1,
-      memberName: selectedMember.name,
-      amount: parseFloat(formData.amount),
-      plan: selectedMember.plan,
-      date: formData.date,
-      status: "Completed",
-      method: formData.method,
-      transactionId: `TXN${Date.now().toString().slice(-6)}`
-    };
-
-    setPayments(prev => [newPayment, ...prev]);
-    toast({
-      title: "Payment Recorded",
-      description: `Payment of $${formData.amount} has been recorded successfully.`,
-    });
-
-    setFormData({
-      memberId: "",
-      amount: "",
-      method: "",
-      date: new Date().toISOString().split('T')[0]
-    });
-    setIsDialogOpen(false);
+    createPaymentMutation.mutate(formData);
   };
 
   const getStatusBadge = (status: string) => {
@@ -138,11 +168,11 @@ export default function Payments() {
     }
   };
 
-  const totalRevenue = payments
+  const totalRevenue = filteredPayments
     .filter(p => p.status === "Completed")
     .reduce((sum, p) => sum + p.amount, 0);
 
-  const pendingAmount = payments
+  const pendingAmount = filteredPayments
     .filter(p => p.status === "Pending")
     .reduce((sum, p) => sum + p.amount, 0);
 
@@ -172,8 +202,8 @@ export default function Payments() {
                     <SelectValue placeholder="Select a member" />
                   </SelectTrigger>
                   <SelectContent>
-                    {mockMembers.map((member) => (
-                      <SelectItem key={member.id} value={member.id.toString()}>
+                    {members.map((member) => (
+                      <SelectItem key={member.id} value={member.id}>
                         {member.name} - {member.plan}
                       </SelectItem>
                     ))}
@@ -225,8 +255,8 @@ export default function Payments() {
                 <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" className="bg-gradient-primary">
-                  Record Payment
+                <Button type="submit" className="bg-gradient-primary" disabled={createPaymentMutation.isPending}>
+                  {createPaymentMutation.isPending ? 'Recording...' : 'Record Payment'}
                 </Button>
               </div>
             </form>
@@ -264,7 +294,7 @@ export default function Payments() {
             <User className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{payments.length}</div>
+            <div className="text-2xl font-bold">{filteredPayments.length}</div>
             <p className="text-xs text-muted-foreground">All payment records</p>
           </CardContent>
         </Card>
